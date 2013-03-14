@@ -105,6 +105,18 @@ int usb_stor_S7_e220_init(struct us_data *us)
 	return 0;
 }
 
+/* This places the HUAWEI usb dongles in multi-port mode */
+static int usb_stor_huawei_feature_init(struct us_data *us)	
+{
+	int result;
+	result = usb_stor_control_msg(us, us->send_ctrl_pipe,
+				      USB_REQ_SET_FEATURE,
+				      USB_TYPE_STANDARD | USB_RECIP_DEVICE,
+				      0x01, 0x0, NULL, 0x0, 1000);
+	US_DEBUGP("Huawei mode set result is %d\n", result);
+	return 0;
+}
+
 /*
  * It will send a scsi switch command called rewind' to huawei dongle.
  * When the dongle receives this command at the first time,
