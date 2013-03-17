@@ -586,39 +586,6 @@ static struct resource gsbi9_qup_i2c_resources[] = {
 	},
 };
 
-static struct resource gsbi10_qup_i2c_resources[] = {
-	{
-		.name	= "qup_phys_addr",
-		.start	= MSM_GSBI10_QUP_PHYS,
-		.end	= MSM_GSBI10_QUP_PHYS + SZ_4K - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.name	= "gsbi_qup_i2c_addr",
-		.start	= MSM_GSBI10_PHYS,
-		.end	= MSM_GSBI10_PHYS + 4 - 1,
-		.flags	= IORESOURCE_MEM,
-	},
-	{
-		.name	= "qup_err_intr",
-		.start	= GSBI10_QUP_IRQ,
-		.end	= GSBI10_QUP_IRQ,
-		.flags	= IORESOURCE_IRQ,
-	},
-	{
-		.name	= "i2c_clk",
-		.start	= 73,
-		.end	= 73,
-		.flags	= IORESOURCE_IO,
-	},
-	{
-		.name	= "i2c_sda",
-		.start	= 72,
-		.end	= 72,
-		.flags	= IORESOURCE_IO,
-	},
-};
-
 
 static struct resource gsbi12_qup_i2c_resources[] = {
 	{
@@ -1041,14 +1008,6 @@ struct platform_device msm_gsbi4_qup_i2c_device = {
 	.resource	= gsbi4_qup_i2c_resources,
 };
 
-/* Use GSBI5 QUP for /dev/i2c-9 */
-struct platform_device msm_gsbi5_qup_i2c_device = {
-	.name           = "qup_i2c",
-	.id             = MSM_GSBI5_QUP_I2C_BUS_ID,
-	.num_resources  = ARRAY_SIZE(gsbi5_qup_i2c_resources),
-	.resource       = gsbi5_qup_i2c_resources,
-};
-
 /* Use GSBI8 QUP for /dev/i2c-3 */
 struct platform_device msm_gsbi8_qup_i2c_device = {
 	.name		= "qup_i2c",
@@ -1071,14 +1030,6 @@ struct platform_device msm_gsbi7_qup_i2c_device = {
 	.id		= MSM_GSBI7_QUP_I2C_BUS_ID,
 	.num_resources	= ARRAY_SIZE(gsbi7_qup_i2c_resources),
 	.resource	= gsbi7_qup_i2c_resources,
-};
-
-/* Use GSBI12 QUP for /dev/i2c-5 (Sensors) */
-struct platform_device msm_gsbi10_qup_i2c_device = {
-	.name		= "qup_i2c",
-	.id		= MSM_GSBI10_QUP_I2C_BUS_ID,
-	.num_resources	= ARRAY_SIZE(gsbi10_qup_i2c_resources),
-	.resource	= gsbi10_qup_i2c_resources,
 };
 
 
