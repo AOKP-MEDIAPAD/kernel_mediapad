@@ -29,12 +29,16 @@
 #include "clock-voter.h"
 #include "devices.h"
 #include "devices-msm8x60.h"
+#include <linux/mfd/pmic8058.h>
+#include <linux/pmic8058-xoadc.h>
+#include <linux/msm_adc.h>
 #include <linux/dma-mapping.h>
 #include <linux/irq.h>
 #include <linux/clk.h>
 #include <asm/hardware/gic.h>
 #include <asm/mach-types.h>
 #include <asm/clkdev.h>
+#include <asm/mach/flash.h>
 #include <mach/msm_serial_hs_lite.h>
 #include <mach/msm_bus.h>
 #include <mach/msm_bus_board.h>
@@ -49,6 +53,7 @@
 #include <linux/android_pmem.h>
 #include <linux/gpio.h>
 #include <linux/delay.h>
+#include <linux/io.h>
 #include <mach/mdm.h>
 #include <mach/rpm.h>
 #include <mach/board.h>
@@ -93,6 +98,9 @@
 #define MSM_UART3DM_PHYS    (MSM_GSBI3_PHYS + 0x40000)
 #define INT_UART3DM_IRQ     GSBI3_UARTDM_IRQ
 #define TCSR_BASE_PHYS      0x16b00000
+
+#define MSM_UART11DM_PHYS    (MSM_GSBI11_PHYS + 0x40000)
+#define INT_UART11DM_IRQ     GSBI11_UARTDM_IRQ
 
 /* PRNG device */
 #define MSM_PRNG_PHYS		0x16C00000
@@ -168,6 +176,9 @@ struct platform_device msm_charm_modem = {
 #else
 #define GSBI12_DEV (&msm_gsbi12_qup_i2c_device.dev)
 #endif
+
+struct _irq_state *irq_count_info_ptr;
+struct _handle_irq *handle_irq;
 
 void __init msm8x60_init_irq(void)
 {
@@ -287,6 +298,34 @@ struct platform_device msm_device_uart_dm3 = {
 	.resource = msm_uart3_dm_resources,
 };
 
+static struct resource msm_uart11_dm_resources[] = {
+	{
+		.start = MSM_UART11DM_PHYS,
+		.end   = MSM_UART11DM_PHYS + PAGE_SIZE - 1,
+		.name  = "uartdm_resource",
+		.flags = IORESOURCE_MEM,
+	},
+	{
+		.start = INT_UART11DM_IRQ,
+		.end   = INT_UART11DM_IRQ,
+		.flags = IORESOURCE_IRQ,
+	},
+	{
+		/* GSBI 11 is UART_GSBI11 */
+		.start = MSM_GSBI11_PHYS,
+		.end   = MSM_GSBI11_PHYS + PAGE_SIZE - 1,
+		.name  = "gsbi_resource",
+		.flags = IORESOURCE_MEM,
+	},
+};
+
+struct platform_device msm_device_uart_dm11 = {
+	.name = "msm_serial_hsl",
+	.id = 3,
+	.num_resources = ARRAY_SIZE(msm_uart11_dm_resources),
+	.resource = msm_uart11_dm_resources,
+};
+
 static struct resource msm_uart12_dm_resources[] = {
 	{
 		.start = MSM_UART2DM_PHYS,
@@ -352,6 +391,71 @@ struct platform_device *msm_add_gsbi9_uart(void)
 					sizeof(uart_gsbi9_pdata));
 }
 #endif
+
+static struct resource gsbi2_qup_spi_resources[] = {
+	{
+		.name   = "spi_base",
+		.start  = MSM_GSBI2_QUP_PHYS,
+		.end    = MSM_GSBI2_QUP_PHYS + SZ_4K - 1,
+		.flags  = IORESOURCE_MEM,
+	},
+	{
+		.name   = "gsbi_base",
+		.start  = MSM_GSBI2_PHYS,
+		.end    = MSM_GSBI2_PHYS + 4 - 1,
+		.flags  = IORESOURCE_MEM,
+	},
+	{
+		.name   = "spi_irq_in",
+		.start  = GSBI2_QUP_IRQ,
+		.end    = GSBI2_QUP_IRQ,
+		.flags  = IORESOURCE_IRQ,
+	},
+	{
+		.name   = "spidm_channels",
+		.start  = 5,
+		.end    = 6,
+		.flags  = IORESOURCE_DMA,
+	},
+	{
+		.name   = "spidm_crci",
+		.start  = 8,
+		.end    = 7,
+		.flags  = IORESOURCE_DMA,
+	},
+	{
+		.name   = "spi_clk",
+		.start  = 40,
+		.end    = 40,
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.name   = "spi_cs",
+		.start  = 39,
+		.end    = 39,
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.name   = "spi_miso",
+		.start  = 38,
+		.end    = 38,
+		.flags  = IORESOURCE_IO,
+	},
+	{
+		.name   = "spi_mosi",
+		.start  = 37,
+		.end    = 37,
+		.flags  = IORESOURCE_IO,
+	},
+};
+
+/* Use GSBI2 QUP for SPI-1 */
+struct platform_device msm_gsbi2_qup_spi_device = {
+	.name       = "spi_qsd",
+	.id     = 1,
+	.num_resources  = ARRAY_SIZE(gsbi2_qup_spi_resources),
+	.resource   = gsbi2_qup_spi_resources,
+};
 
 static struct resource gsbi3_qup_i2c_resources[] = {
 	{
@@ -482,6 +586,40 @@ static struct resource gsbi9_qup_i2c_resources[] = {
 	},
 };
 
+static struct resource gsbi10_qup_i2c_resources[] = {
+	{
+		.name	= "qup_phys_addr",
+		.start	= MSM_GSBI10_QUP_PHYS,
+		.end	= MSM_GSBI10_QUP_PHYS + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.name	= "gsbi_qup_i2c_addr",
+		.start	= MSM_GSBI10_PHYS,
+		.end	= MSM_GSBI10_PHYS + 4 - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.name	= "qup_err_intr",
+		.start	= GSBI10_QUP_IRQ,
+		.end	= GSBI10_QUP_IRQ,
+		.flags	= IORESOURCE_IRQ,
+	},
+	{
+		.name	= "i2c_clk",
+		.start	= 73,
+		.end	= 73,
+		.flags	= IORESOURCE_IO,
+	},
+	{
+		.name	= "i2c_sda",
+		.start	= 72,
+		.end	= 72,
+		.flags	= IORESOURCE_IO,
+	},
+};
+
+
 static struct resource gsbi12_qup_i2c_resources[] = {
 	{
 		.name	= "qup_phys_addr",
@@ -536,7 +674,7 @@ static struct msm_bus_vectors grp3d_nominal_high_vectors[] = {
 		.src = MSM_BUS_MASTER_GRAPHICS_3D,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
 		.ab = 0,
-		.ib = KGSL_CONVERT_TO_MBPS(2008),
+		.ib = KGSL_CONVERT_TO_MBPS(2484),
 	},
 };
 
@@ -545,7 +683,7 @@ static struct msm_bus_vectors grp3d_max_vectors[] = {
 		.src = MSM_BUS_MASTER_GRAPHICS_3D,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
 		.ab = 0,
-		.ib = KGSL_CONVERT_TO_MBPS(2484),
+		.ib = KGSL_CONVERT_TO_MBPS(2976),
 	},
 };
 
@@ -587,12 +725,21 @@ static struct msm_bus_vectors grp2d0_init_vectors[] = {
 	},
 };
 
+static struct msm_bus_vectors grp2d0_nominal_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_GRAPHICS_2D_CORE0,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab = 0,
+		.ib = KGSL_CONVERT_TO_MBPS(1300),
+	},
+};
+
 static struct msm_bus_vectors grp2d0_max_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_GRAPHICS_2D_CORE0,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
 		.ab = 0,
-		.ib = KGSL_CONVERT_TO_MBPS(990),
+		.ib = KGSL_CONVERT_TO_MBPS(2048),
 	},
 };
 
@@ -600,6 +747,10 @@ static struct msm_bus_paths grp2d0_bus_scale_usecases[] = {
 	{
 		ARRAY_SIZE(grp2d0_init_vectors),
 		grp2d0_init_vectors,
+	},
+	{
+		ARRAY_SIZE(grp2d0_nominal_vectors),
+		grp2d0_nominal_vectors,
 	},
 	{
 		ARRAY_SIZE(grp2d0_max_vectors),
@@ -622,12 +773,21 @@ static struct msm_bus_vectors grp2d1_init_vectors[] = {
 	},
 };
 
+static struct msm_bus_vectors grp2d1_nominal_vectors[] = {
+	{
+		.src = MSM_BUS_MASTER_GRAPHICS_2D_CORE1,
+		.dst = MSM_BUS_SLAVE_EBI_CH0,
+		.ab = 0,
+		.ib = KGSL_CONVERT_TO_MBPS(1300),
+	},
+};
+
 static struct msm_bus_vectors grp2d1_max_vectors[] = {
 	{
 		.src = MSM_BUS_MASTER_GRAPHICS_2D_CORE1,
 		.dst = MSM_BUS_SLAVE_EBI_CH0,
 		.ab = 0,
-		.ib = KGSL_CONVERT_TO_MBPS(990),
+		.ib = KGSL_CONVERT_TO_MBPS(2048),
 	},
 };
 
@@ -635,6 +795,10 @@ static struct msm_bus_paths grp2d1_bus_scale_usecases[] = {
 	{
 		ARRAY_SIZE(grp2d1_init_vectors),
 		grp2d1_init_vectors,
+	},
+	{
+		ARRAY_SIZE(grp2d1_nominal_vectors),
+		grp2d1_nominal_vectors,
 	},
 	{
 		ARRAY_SIZE(grp2d1_max_vectors),
@@ -682,31 +846,32 @@ static struct resource kgsl_3d0_resources[] = {
 static struct kgsl_device_platform_data kgsl_3d0_pdata = {
 	.pwrlevel = {
 		{
-			.gpu_freq = 266667000,
+			.gpu_freq = 320000000,
 			.bus_freq = 4,
 			.io_fraction = 0,
 		},
 		{
+			.gpu_freq = 300000000,
+			.bus_freq = 4,
+			.io_fraction = 0,
+		},
+		{
+			.gpu_freq = 266667000,
+			.bus_freq = 4,
+			.io_fraction = 25,
+		},
+		{
 			.gpu_freq = 228571000,
 			.bus_freq = 3,
-			.io_fraction = 33,
+			.io_fraction = 50,
 		},
 		{
 			.gpu_freq = 200000000,
 			.bus_freq = 2,
 			.io_fraction = 100,
 		},
-		{
-			.gpu_freq = 177778000,
-			.bus_freq = 1,
-			.io_fraction = 100,
-		},
-		{
-			.gpu_freq = 27000000,
-			.bus_freq = 0,
-		},
 	},
-	.init_level = 0,
+	.init_level = 4,
 	.num_levels = 5,
 	.set_grp_async = NULL,
 	.idle_timeout = HZ/5,
@@ -745,19 +910,31 @@ static struct resource kgsl_2d0_resources[] = {
 static struct kgsl_device_platform_data kgsl_2d0_pdata = {
 	.pwrlevel = {
 		{
-			.gpu_freq = 200000000,
-			.bus_freq = 1,
+			.gpu_freq = 266667000,
+			.bus_freq = 2,
+		},
+		{
+			.gpu_freq = 228571000,
+			.bus_freq = 2,
 		},
 		{
 			.gpu_freq = 200000000,
-			.bus_freq = 0,
+			.bus_freq = 2,
+		},
+		{
+			.gpu_freq = 160000000,
+			.bus_freq = 2,
+		},
+		{
+			.gpu_freq = 145455000,
+			.bus_freq = 1,
 		},
 	},
-	.init_level = 0,
-	.num_levels = 2,
+	.init_level = 4,
+	.num_levels = 5,
 	.set_grp_async = NULL,
-	.idle_timeout = HZ/10,
-	.nap_allowed = true,
+	.idle_timeout = HZ/5,
+	.nap_allowed = false,
 	.clk_map = KGSL_CLK_CORE | KGSL_CLK_IFACE,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.bus_scale_table = &grp2d0_bus_scale_pdata,
@@ -792,19 +969,31 @@ static struct resource kgsl_2d1_resources[] = {
 static struct kgsl_device_platform_data kgsl_2d1_pdata = {
 	.pwrlevel = {
 		{
-			.gpu_freq = 200000000,
-			.bus_freq = 1,
+			.gpu_freq = 266667000,
+			.bus_freq = 2,
+		},
+		{
+			.gpu_freq = 228571000,
+			.bus_freq = 2,
 		},
 		{
 			.gpu_freq = 200000000,
-			.bus_freq = 0,
+			.bus_freq = 2,
+		},
+		{
+			.gpu_freq = 160000000,
+			.bus_freq = 2,
+		},
+		{
+			.gpu_freq = 145455000,
+			.bus_freq = 1,
 		},
 	},
-	.init_level = 0,
-	.num_levels = 2,
+	.init_level = 4,
+	.num_levels = 5,
 	.set_grp_async = NULL,
-	.idle_timeout = HZ/10,
-	.nap_allowed = true,
+	.idle_timeout = HZ/5,
+	.nap_allowed = false,
 	.clk_map = KGSL_CLK_CORE | KGSL_CLK_IFACE,
 #ifdef CONFIG_MSM_BUS_SCALING
 	.bus_scale_table = &grp2d1_bus_scale_pdata,
@@ -852,6 +1041,14 @@ struct platform_device msm_gsbi4_qup_i2c_device = {
 	.resource	= gsbi4_qup_i2c_resources,
 };
 
+/* Use GSBI5 QUP for /dev/i2c-9 */
+struct platform_device msm_gsbi5_qup_i2c_device = {
+	.name           = "qup_i2c",
+	.id             = MSM_GSBI5_QUP_I2C_BUS_ID,
+	.num_resources  = ARRAY_SIZE(gsbi5_qup_i2c_resources),
+	.resource       = gsbi5_qup_i2c_resources,
+};
+
 /* Use GSBI8 QUP for /dev/i2c-3 */
 struct platform_device msm_gsbi8_qup_i2c_device = {
 	.name		= "qup_i2c",
@@ -877,6 +1074,15 @@ struct platform_device msm_gsbi7_qup_i2c_device = {
 };
 
 /* Use GSBI12 QUP for /dev/i2c-5 (Sensors) */
+struct platform_device msm_gsbi10_qup_i2c_device = {
+	.name		= "qup_i2c",
+	.id		= MSM_GSBI10_QUP_I2C_BUS_ID,
+	.num_resources	= ARRAY_SIZE(gsbi10_qup_i2c_resources),
+	.resource	= gsbi10_qup_i2c_resources,
+};
+
+
+/* Use GSBI12 QUP for /dev/i2c-10 */
 struct platform_device msm_gsbi12_qup_i2c_device = {
 	.name		= "qup_i2c",
 	.id		= MSM_GSBI12_QUP_I2C_BUS_ID,
@@ -919,6 +1125,24 @@ struct platform_device msm_device_ssbi_pmic2 = {
 #endif
 
 #ifdef CONFIG_I2C_SSBI
+/* 8901 PMIC SSBI on /dev/i2c-7 */
+#define MSM_SSBI2_PMIC2B_PHYS	0x00C00000
+static struct resource msm_ssbi2_resources[] = {
+	{
+		.name   = "ssbi_base",
+		.start	= MSM_SSBI2_PMIC2B_PHYS,
+		.end	= MSM_SSBI2_PMIC2B_PHYS + SZ_4K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+};
+
+struct platform_device msm_device_ssbi2 = {
+	.name		= "i2c_ssbi",
+	.id		= MSM_SSBI2_I2C_BUS_ID,
+	.num_resources	= ARRAY_SIZE(msm_ssbi2_resources),
+	.resource	= msm_ssbi2_resources,
+};
+
 /* CODEC SSBI on /dev/i2c-8 */
 #define MSM_SSBI3_PHYS  0x18700000
 static struct resource msm_ssbi3_resources[] = {
@@ -945,6 +1169,17 @@ struct platform_device device_gpio_i2c_adpt = {
 };
 #endif
 
+#ifdef CONFIG_MSM_SSBI
+struct platform_device msm_device_pm8058 = {
+	.name	= "pm8058-core",
+	.id		= 0,
+};
+
+struct platform_device msm_device_pm8901 = {
+	.name	= "pm8901-core",
+	.id		= 1,
+};
+#endif
 
 static struct resource gsbi1_qup_spi_resources[] = {
 	{
@@ -1395,7 +1630,7 @@ static struct resource msm_mipi_dsi_resources[] = {
 
 static struct platform_device msm_mipi_dsi_device = {
 	.name   = "mipi_dsi",
-	.id     = 1,
+	.id     = 0,
 	.num_resources  = ARRAY_SIZE(msm_mipi_dsi_resources),
 	.resource       = msm_mipi_dsi_resources,
 };
@@ -1660,10 +1895,24 @@ struct platform_device msm_device_otg = {
 	.resource	= resources_otg,
 };
 
+static struct resource resources_hsusb[] = {
+	{
+		.start	= 0x12500000,
+		.end	= 0x12500000 + SZ_1K - 1,
+		.flags	= IORESOURCE_MEM,
+	},
+	{
+		.start	= USB1_HS_IRQ,
+		.end	= USB1_HS_IRQ,
+		.flags	= IORESOURCE_IRQ,
+	},
+};
 static u64 dma_mask = 0xffffffffULL;
 struct platform_device msm_device_gadget_peripheral = {
 	.name		= "msm_hsusb",
 	.id		= -1,
+	.num_resources	= ARRAY_SIZE(resources_hsusb),
+	.resource	= resources_hsusb,
 	.dev		= {
 		.dma_mask 		= &dma_mask,
 		.coherent_dma_mask	= 0xffffffffULL,
@@ -1871,9 +2120,8 @@ struct platform_device msm_device_smd = {
 };
 
 static struct msm_watchdog_pdata msm_watchdog_pdata = {
-	//.pet_time = 10000,
-	.pet_time = 3000,
-	.bark_time = 11000,
+	.pet_time = 10000,
+	.bark_time = 18000,
 	.has_secure = true,
 };
 
@@ -2561,5 +2809,94 @@ struct platform_device msm_rpm_device = {
 	.name = "msm_rpm",
 	.id = -1,
 };
+#endif
 
+struct flash_platform_data msm_nand_data = {
+	.parts          = NULL,
+	.nr_parts       = 0,
+};
+
+#ifdef CONFIG_SENSORS_MSM_ADC
+static void pmic8058_xoadc_mpp_config(void)
+{
+	/* Do not set mpp to amux in here.
+	   Set the mpp to amux mapping when needed and then reset */
+}
+
+static struct regulator *vreg_ldo18_adc;
+
+static int pmic8058_xoadc_vreg_config(int on)
+{
+	int rc;
+
+	if (on) {
+		rc = regulator_enable(vreg_ldo18_adc);
+		if (rc)
+			pr_err("%s: Enable of regulator ldo18_adc "
+						"failed\n", __func__);
+	} else {
+		rc = regulator_disable(vreg_ldo18_adc);
+		if (rc)
+			pr_err("%s: Disable of regulator ldo18_adc "
+						"failed\n", __func__);
+	}
+
+	return rc;
+}
+
+static int pmic8058_xoadc_vreg_setup(void)
+{
+	int rc;
+
+	vreg_ldo18_adc = regulator_get(NULL, "8058_l18");
+	if (IS_ERR(vreg_ldo18_adc)) {
+		printk(KERN_ERR "%s: vreg get failed (%ld)\n",
+			__func__, PTR_ERR(vreg_ldo18_adc));
+		rc = PTR_ERR(vreg_ldo18_adc);
+		goto fail;
+	}
+
+	rc = regulator_set_voltage(vreg_ldo18_adc, 2200000, 2200000);
+	if (rc) {
+		pr_err("%s: unable to set ldo18 voltage to 2.2V\n", __func__);
+		goto fail;
+	}
+
+	rc = regulator_enable(vreg_ldo18_adc);
+	if (rc) {
+		pr_err("%s: Enable of regulator ldo18_adc "
+					"failed\n", __func__);
+		goto fail;
+	}
+	return rc;
+fail:
+	regulator_put(vreg_ldo18_adc);
+	return rc;
+}
+
+static void pmic8058_xoadc_vreg_shutdown(void)
+{
+	regulator_put(vreg_ldo18_adc);
+}
+
+/* usec. For this ADC,
+ * this time represents clk rate @ txco w/ 1024 decimation ratio.
+ * Each channel has different configuration, thus at the time of starting
+ * the conversion, xoadc will return actual conversion time
+ */
+static struct adc_properties pm8058_xoadc_data = {
+	.adc_reference          = 2200, /* milli-voltage for this adc */
+	.bitresolution         = 15,
+	.bipolar                = 0,
+	.conversiontime         = 54,
+};
+
+struct xoadc_platform_data pm8058_xoadc_pdata = {
+	.xoadc_prop = &pm8058_xoadc_data,
+	.xoadc_mpp_config = pmic8058_xoadc_mpp_config,
+	.xoadc_vreg_set = pmic8058_xoadc_vreg_config,
+	.xoadc_num = XOADC_PMIC_0,
+	.xoadc_vreg_setup = pmic8058_xoadc_vreg_setup,
+	.xoadc_vreg_shutdown = pmic8058_xoadc_vreg_shutdown,
+};
 #endif
